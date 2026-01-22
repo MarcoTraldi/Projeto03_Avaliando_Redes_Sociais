@@ -1,0 +1,190 @@
+// Criando constraints
+
+CREATE CONSTRAINT pessoa_id IF NOT EXISTS
+FOR (p:Pessoa)
+REQUIRE p.pessoa_id IS UNIQUE;
+
+CREATE CONSTRAINT post_id IF NOT EXISTS
+FOR (p:Post)
+REQUIRE p.post_id IS UNIQUE;
+
+CREATE CONSTRAINT grupo_id IF NOT EXISTS
+FOR (g:Grupo)
+REQUIRE g.grupo_id IS UNIQUE;
+
+CREATE CONSTRAINT comunidade_id IF NOT EXISTS
+FOR (c:Comunidade)
+REQUIRE c.comunidade_id IS UNIQUE;
+
+CREATE INDEX post_data IF NOT EXISTS
+FOR (p:Post)
+ON (p.data_publicacao);
+
+// Importações de dados:
+
+// PESSOAS
+LOAD CSV WITH HEADERS
+FROM 'file:///pessoas.csv'
+AS row
+FIELDTERMINATOR ';'
+MERGE (p:Pessoa {pessoa_id: toInteger(row.pessoa_id)})
+SET
+  p.nome = row.nome,
+  p.cidade = row.cidade;
+
+
+// COMUNIDADES
+LOAD CSV WITH HEADERS
+FROM 'file:///comunidades.csv'
+AS row
+FIELDTERMINATOR ';'
+MERGE (c:Comunidade {comunidade_id: toInteger(row.comunidade_id)})
+SET c.nome = row.nome;
+
+// GRUPOS
+LOAD CSV WITH HEADERS
+FROM 'file:///grupos.csv'
+AS row
+FIELDTERMINATOR ';'
+MERGE (g:Grupo {grupo_id: toInteger(row.grupo_id)})
+SET g.nome = row.nome;
+
+// POSTS
+LOAD CSV WITH HEADERS
+FROM 'file:///posts.csv'
+AS row
+FIELDTERMINATOR ';'
+MERGE (p:Post {post_id: toInteger(row.post_id)})
+SET
+  p.conteudo = row.conteudo,
+  p.data_publicacao =
+    date({
+      day:   toInteger(split(row.data_publicacao, '/')[0]),
+      month: toInteger(split(row.data_publicacao, '/')[1]),
+      year:  toInteger(split(row.data_publicacao, '/')[2])
+    });
+
+// RELACIONAMENTOS
+// PESSOA - COMUNIDADE
+LOAD CSV WITH HEADERS
+FROM 'file:///grupos_comunidade.csv'
+AS row
+FIELDTERMINATOR ';'
+MATCH (g:Grupo {grupo_id: toInteger(row.grupo_id)})
+MATCH (c:Comunidade {comunidade_id: toInteger(row.comunidade_id)})
+MERGE (g)-[:PERTENCE_A]->(c);
+
+// PESSOA – GRUPO
+LOAD CSV WITH HEADERS
+FROM 'file:///membros_grupo.csv'
+AS row
+FIELDTERMINATOR ';'
+MATCH (p:Pessoa {pessoa_id: toInteger(row.pessoa_id)})
+MATCH (g:Grupo {grupo_id: toInteger(row.grupo_id)})
+MERGE (p)-[:MEMBRO_DE]->(g);
+
+// PESSOA SEGUE PESSOA
+LOAD CSV WITH HEADERS
+FROM 'file:///seguidores.csv'
+AS row
+FIELDTERMINATOR ';'
+MATCH (p1:Pessoa {pessoa_id: toInteger(row.pessoa_origem_id)})
+MATCH (p2:Pessoa {pessoa_id: toInteger(row.pessoa_destino_id)})
+MERGE (p1)-[:SEGUE]->(p2);
+
+// PESSOA POSTOU
+LOAD CSV WITH HEADERS
+FROM 'file:///postagens.csv'
+AS row
+FIELDTERMINATOR ';'
+MATCH (p:Pessoa {pessoa_id: toInteger(row.pessoa_id)})
+MATCH (post:Post {post_id: toInteger(row.post_id)})
+MERGE (p)-[:POSTOU]->(post);
+
+// PESSOA CURTIU POST
+LOAD CSV WITH HEADERS
+FROM 'file:///curtidas.csv'
+AS row
+FIELDTERMINATOR ';'
+
+MATCH (p:Pessoa {pessoa_id: toInteger(row.pessoa_id)})
+MATCH (post:Post {post_id: toInteger(row.post_id)})
+
+MERGE (p)-[c:CURTIU]->(post)
+SET c.data_curtida =
+  date({
+    day:   toInteger(split(row.data_curtida, '/')[0]),
+    month: toInteger(split(row.data_curtida, '/')[1]),
+    year:  toInteger(split(row.data_curtida, '/')[2])
+  });
+
+CREATE CONSTRAINT grupo_id IF NOT EXISTS
+FOR (g:Grupo)
+REQUIRE g.grupo_id IS UNIQUE;
+
+CREATE CONSTRAINT comunidade_id IF NOT EXISTS
+FOR (c:Comunidade)
+REQUIRE c.comunidade_id IS UNIQUE;
+
+// CRIAR COMUNIDADES
+LOAD CSV WITH HEADERS
+FROM 'file:///comunidades.csv'
+AS row
+FIELDTERMINATOR ';'
+
+MERGE (c:Comunidade {comunidade_id: toInteger(row.comunidade_id)})
+SET
+  c.nome = row.nome,
+  c.tema = row.tema;
+
+// CRIAR GRUPO + VÍNCULO COM COMUNIDADE
+LOAD CSV WITH HEADERS
+FROM 'file:///grupos.csv'
+AS row
+FIELDTERMINATOR ';'
+
+MATCH (c:Comunidade {comunidade_id: toInteger(row.comunidade_id)})
+
+MERGE (g:Grupo {grupo_id: toInteger(row.grupo_id)})
+SET g.nome = row.nome
+
+MERGE (g)-[:PERTENCE_A]->(c);
+
+// CRIAR MEMBROS DE
+LOAD CSV WITH HEADERS
+FROM 'file:///membros_grupo.csv'
+AS row
+FIELDTERMINATOR ';'
+
+MATCH (p:Pessoa {pessoa_id: toInteger(row.pessoa_id)})
+MATCH (g:Grupo {grupo_id: toInteger(row.grupo_id)})
+
+MERGE (p)-[m:MEMBRO_DE]->(g)
+SET m.desde =
+  date({
+    day:   toInteger(split(row.desde,'/')[0]),
+    month: toInteger(split(row.desde,'/')[1]),
+    year:  toInteger(split(row.desde,'/')[2])
+  });
+
+// Questões relevantes
+
+// QUAIS PESSOAS SEGUIR?
+MATCH (p:Pessoa {nome: 'Beltrano'})-[:SEGUE]->(:Pessoa)-[:SEGUE]->(recomendado:Pessoa)
+WHERE NOT (p)-[:SEGUE]->(recomendado)
+  AND p <> recomendado
+
+OPTIONAL MATCH (p)-[:MEMBRO_DE]->(g:Grupo)<-[:MEMBRO_DE]-(recomendado)
+
+RETURN
+  recomendado.nome AS pessoa,
+  count(DISTINCT g) AS grupos_em_comum,
+  count(*) AS amigos_em_comum
+ORDER BY amigos_em_comum DESC, grupos_em_comum DESC
+LIMIT 5;
+
+// Qual o caminho mais curto entre duas pessoas?
+MATCH (p1:Pessoa {nome: 'Fulano'}),
+      (p2:Pessoa {nome: 'Pedro'}),
+      caminho = shortestPath((p1)-[:SEGUE*..5]->(p2))
+RETURN caminho;
